@@ -1,5 +1,6 @@
 package com.izowifar.voicelimits;
 
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -17,6 +18,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 
 public class VolumeLimitService extends Service {
@@ -24,12 +26,14 @@ public class VolumeLimitService extends Service {
     static final String ACTION_STOP = "com.izowifar.voicelimits.STOP";
     private static final String CHANNEL_ID = "voice_limits_running";
     private static final int NOTIFICATION_ID = 4701;
+    private static final int KEEP_ALIVE_REQUEST_CODE = 4702;
 
     // Fast enough to pull the volume back almost immediately after a hardware-key repeat.
     // 50ms is intentionally aggressive because the app is safety-oriented and only runs when enabled.
     private static final long CHECK_INTERVAL_MS = 50L;
     private static final long BURST_INTERVAL_MS = 15L;
     private static final int BURST_CHECKS = 12;
+    private static final long KEEP_ALIVE_INTERVAL_MS = 20_000L;
 
     private AudioManager audioManager;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -42,6 +46,7 @@ public class VolumeLimitService extends Service {
         @Override
         public void run() {
             if (!VolumeLimiter.isEnabled(VolumeLimitService.this)) {
+                cancelKeepAlive(VolumeLimitService.this);
                 stopSelf();
                 return;
             }
@@ -73,6 +78,7 @@ public class VolumeLimitService extends Service {
         registerNoisyReceiver();
         handler.post(checkRunnable);
         startBurstChecks();
+        scheduleKeepAlive(this);
     }
 
     @Override
@@ -80,10 +86,12 @@ public class VolumeLimitService extends Service {
         String action = intent == null ? ACTION_START : intent.getAction();
         if (ACTION_STOP.equals(action)) {
             VolumeLimiter.setEnabled(this, false);
+            cancelKeepAlive(this);
             stopSelf();
             return START_NOT_STICKY;
         }
         VolumeLimiter.setEnabled(this, true);
+        scheduleKeepAlive(this);
         startBurstChecks();
         enforceLimit(false);
         return START_STICKY;
@@ -109,7 +117,56 @@ public class VolumeLimitService extends Service {
             } catch (Exception ignored) {
             }
         }
+        if (VolumeLimiter.isEnabled(this)) {
+            scheduleKeepAlive(this);
+        }
         super.onDestroy();
+    }
+
+    static void scheduleKeepAlive(Context context) {
+        if (!VolumeLimiter.isEnabled(context)) return;
+        AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (alarmManager == null) return;
+
+        Intent intent = new Intent(context, KeepAliveReceiver.class);
+        intent.setAction(KeepAliveReceiver.ACTION_KEEP_ALIVE);
+        PendingIntent pendingIntent = PendingIntent.getBroadcast(
+                context,
+                KEEP_ALIVE_REQUEST_CODE,
+                intent,
+                pendingIntentFlags()
+        );
+
+        long triggerAt = SystemClock.elapsedRealtime() + KEEP_ALIVE_INTERVAL_MS;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent);
+            } else {
+                alarmManager.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent);
+            }
+        } catch (SecurityException ignored) {
+            alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent);
+        }
+    }
+
+    static void cancelKeepAlive(Context context) {
+        AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (alarmManager == null) return;
+        Intent intent = new Intent(context, KeepAliveReceiver.class);
+        intent.setAction(KeepAliveReceiver.ACTION_KEEP_ALIVE);
+        PendingIntent pendingIntent = PendingIntent.getBroadcast(
+                context,
+                KEEP_ALIVE_REQUEST_CODE,
+                intent,
+                pendingIntentFlags()
+        );
+        alarmManager.cancel(pendingIntent);
+    }
+
+    private static int pendingIntentFlags() {
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
+        return flags;
     }
 
     private void registerDeviceCallback() {
@@ -153,7 +210,11 @@ public class VolumeLimitService extends Service {
         };
         IntentFilter filter = new IntentFilter();
         filter.addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
-        registerReceiver(noisyReceiver, filter);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(noisyReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(noisyReceiver, filter);
+        }
     }
 
     private void startBurstChecks() {
