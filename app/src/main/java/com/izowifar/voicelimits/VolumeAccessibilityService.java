@@ -16,7 +16,7 @@ public class VolumeAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // Intentionally no-op. Volume keys are handled only in onKeyEvent.
+        // Intentionally no-op. Volume changes are handled only from key DOWN events.
     }
 
     @Override
@@ -36,31 +36,28 @@ public class VolumeAccessibilityService extends AccessibilityService {
         if (audioManager == null) return false;
         if (!VolumeLimiter.isHeadsetActive(audioManager)) return false;
 
-        // Take over volume keys completely while enabled and a headset is active.
-        // Android's default long-press handling is not allowed to see these events,
-        // otherwise some systems can still race the volume to max.
-        if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-            adjustOneStep(keyCode);
+        // Do not handle ACTION_UP. Handling key-up near the limit can confuse some systems
+        // and may be related to the runaway-to-max behavior seen on the device.
+        if (event.getAction() != KeyEvent.ACTION_DOWN) {
+            return false;
         }
-        return true;
-    }
 
-    private void adjustOneStep(int keyCode) {
-        int current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
-        int max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-        int limit = VolumeLimiter.getLimitVolume(audioManager);
-        int target = current;
+        // Global long-press guard: for both volume-up and volume-down, allow only the first
+        // DOWN event to reach Android. All repeated DOWN events are consumed.
+        // This makes a physical long press behave like one normal tap.
+        if (event.getRepeatCount() > 0) {
+            return true;
+        }
 
+        // Let Android handle normal single taps so the system volume panel still appears.
+        // Only block volume-up when it is already at the configured headset limit.
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-            target = Math.min(current + 1, limit);
-        } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            target = Math.max(current - 1, 0);
+            int current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+            int limit = VolumeLimiter.getLimitVolume(audioManager);
+            return current >= limit;
         }
 
-        target = Math.max(0, Math.min(target, max));
-        if (target != current) {
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0);
-        }
+        return false;
     }
 
     private void ensureAudioManager() {
