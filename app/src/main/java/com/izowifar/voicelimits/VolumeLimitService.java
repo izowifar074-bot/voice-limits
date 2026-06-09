@@ -5,8 +5,11 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.database.ContentObserver;
 import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
@@ -14,17 +17,26 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.provider.Settings;
 
 public class VolumeLimitService extends Service {
     static final String ACTION_START = "com.izowifar.voicelimits.START";
     static final String ACTION_STOP = "com.izowifar.voicelimits.STOP";
     private static final String CHANNEL_ID = "voice_limits_running";
     private static final int NOTIFICATION_ID = 4701;
-    private static final long CHECK_INTERVAL_MS = 650L;
+
+    // Fast enough to pull the volume back almost immediately after a hardware-key repeat.
+    // 50ms is intentionally aggressive because the app is safety-oriented and only runs when enabled.
+    private static final long CHECK_INTERVAL_MS = 50L;
+    private static final long BURST_INTERVAL_MS = 15L;
+    private static final int BURST_CHECKS = 12;
 
     private AudioManager audioManager;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private AudioDeviceCallback deviceCallback;
+    private ContentObserver volumeObserver;
+    private BroadcastReceiver noisyReceiver;
+    private int burstRemaining = 0;
 
     private final Runnable checkRunnable = new Runnable() {
         @Override
@@ -33,8 +45,20 @@ public class VolumeLimitService extends Service {
                 stopSelf();
                 return;
             }
-            enforceLimit();
+            enforceLimit(false);
             handler.postDelayed(this, CHECK_INTERVAL_MS);
+        }
+    };
+
+    private final Runnable burstRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!VolumeLimiter.isEnabled(VolumeLimitService.this)) return;
+            enforceLimit(false);
+            burstRemaining--;
+            if (burstRemaining > 0) {
+                handler.postDelayed(this, BURST_INTERVAL_MS);
+            }
         }
     };
 
@@ -45,7 +69,10 @@ public class VolumeLimitService extends Service {
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildNotification("正在保护耳机音量：上限 47%"));
         registerDeviceCallback();
+        registerVolumeObserver();
+        registerNoisyReceiver();
         handler.post(checkRunnable);
+        startBurstChecks();
     }
 
     @Override
@@ -57,7 +84,8 @@ public class VolumeLimitService extends Service {
             return START_NOT_STICKY;
         }
         VolumeLimiter.setEnabled(this, true);
-        enforceLimit();
+        startBurstChecks();
+        enforceLimit(false);
         return START_STICKY;
     }
 
@@ -72,6 +100,15 @@ public class VolumeLimitService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && audioManager != null && deviceCallback != null) {
             audioManager.unregisterAudioDeviceCallback(deviceCallback);
         }
+        if (volumeObserver != null) {
+            getContentResolver().unregisterContentObserver(volumeObserver);
+        }
+        if (noisyReceiver != null) {
+            try {
+                unregisterReceiver(noisyReceiver);
+            } catch (Exception ignored) {
+            }
+        }
         super.onDestroy();
     }
 
@@ -80,23 +117,56 @@ public class VolumeLimitService extends Service {
             deviceCallback = new AudioDeviceCallback() {
                 @Override
                 public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
-                    enforceLimit();
+                    startBurstChecks();
+                    enforceLimit(false);
                 }
 
                 @Override
                 public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
-                    enforceLimit();
+                    startBurstChecks();
+                    enforceLimit(false);
                 }
             };
             audioManager.registerAudioDeviceCallback(deviceCallback, handler);
         }
     }
 
-    private void enforceLimit() {
+    private void registerVolumeObserver() {
+        volumeObserver = new ContentObserver(handler) {
+            @Override
+            public void onChange(boolean selfChange) {
+                super.onChange(selfChange);
+                startBurstChecks();
+                enforceLimit(false);
+            }
+        };
+        getContentResolver().registerContentObserver(Settings.System.CONTENT_URI, true, volumeObserver);
+    }
+
+    private void registerNoisyReceiver() {
+        noisyReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                startBurstChecks();
+                enforceLimit(false);
+            }
+        };
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
+        registerReceiver(noisyReceiver, filter);
+    }
+
+    private void startBurstChecks() {
+        burstRemaining = BURST_CHECKS;
+        handler.removeCallbacks(burstRunnable);
+        handler.post(burstRunnable);
+    }
+
+    private void enforceLimit(boolean notifyAlways) {
         if (audioManager == null) return;
         if (VolumeLimiter.isHeadsetActive(audioManager)) {
             boolean changed = VolumeLimiter.clampIfNeeded(audioManager);
-            if (changed) {
+            if (changed || notifyAlways) {
                 NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
                 if (manager != null) {
                     manager.notify(NOTIFICATION_ID, buildNotification("已把耳机媒体音量压到 47% 以下"));
