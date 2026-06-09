@@ -1,1 +1,1 @@
-stable build
+passive build
