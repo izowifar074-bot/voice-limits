@@ -1,1 +1,1 @@
-trigger accessibility build
+trigger stable build
