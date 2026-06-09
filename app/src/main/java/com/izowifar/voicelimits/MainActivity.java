@@ -72,7 +72,7 @@ public class MainActivity extends Activity {
         detailText = new TextView(this);
         detailText.setTextSize(14);
         detailText.setGravity(Gravity.CENTER);
-        detailText.setPadding(0, dp(8), 0, dp(20));
+        detailText.setPadding(0, dp(8), 0, dp(16));
         root.addView(detailText, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -86,6 +86,34 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(56)
         ));
+
+        LinearLayout limitRow = new LinearLayout(this);
+        limitRow.setOrientation(LinearLayout.HORIZONTAL);
+        limitRow.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(52)
+        );
+        rowParams.topMargin = dp(12);
+        root.addView(limitRow, rowParams);
+
+        Button downButton = new Button(this);
+        downButton.setAllCaps(false);
+        downButton.setText("上限 -");
+        downButton.setOnClickListener(v -> changeLimit(-1));
+        limitRow.addView(downButton, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
+
+        Button currentButton = new Button(this);
+        currentButton.setAllCaps(false);
+        currentButton.setText("设为当前音量");
+        currentButton.setOnClickListener(v -> setLimitToCurrentVolume());
+        limitRow.addView(currentButton, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 2));
+
+        Button upButton = new Button(this);
+        upButton.setAllCaps(false);
+        upButton.setText("上限 +");
+        upButton.setOnClickListener(v -> changeLimit(1));
+        limitRow.addView(upButton, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
 
         Button accessibilityButton = new Button(this);
         accessibilityButton.setAllCaps(false);
@@ -129,20 +157,43 @@ public class MainActivity extends Activity {
         updateUi();
     }
 
+    private void changeLimit(int delta) {
+        if (audioManager == null) return;
+        int limit = VolumeLimiter.getLimitVolume(this, audioManager);
+        VolumeLimiter.setLimitVolume(this, audioManager, limit + delta);
+        clampCurrentIfNeeded();
+        updateUi();
+    }
+
+    private void setLimitToCurrentVolume() {
+        if (audioManager == null) return;
+        int current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+        VolumeLimiter.setLimitVolume(this, audioManager, current);
+        updateUi();
+    }
+
+    private void clampCurrentIfNeeded() {
+        if (audioManager != null && VolumeLimiter.isHeadsetActive(audioManager)) {
+            VolumeLimiter.clampIfNeeded(this, audioManager);
+        }
+    }
+
     private void updateUi() {
         boolean enabled = VolumeLimiter.isEnabled(this);
         boolean headset = VolumeLimiter.isHeadsetActive(audioManager);
         int max = audioManager == null ? 0 : audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-        int limit = audioManager == null ? 0 : VolumeLimiter.getLimitVolume(audioManager);
+        int limit = audioManager == null ? 0 : VolumeLimiter.getLimitVolume(this, audioManager);
         int current = audioManager == null ? 0 : audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+        int percent = max <= 0 ? 0 : Math.round(limit * 100f / max);
 
         statusText.setText(enabled ? "已启用" : "未启用");
         toggleButton.setText(enabled ? "关闭音量限制" : "启用音量限制");
         detailText.setText("仅在检测到有线耳机、USB 耳机或蓝牙耳机输出时生效。\n"
                 + "当前耳机状态：" + (headset ? "已检测到" : "未检测到") + "\n"
-                + "媒体音量：" + current + " / " + max + "，限制档位：" + limit + "，约 47% 以下。\n\n"
-                + "重要：请在无障碍设置中开启 Voice Limits。开启后即使 App 放到后台，也能监听音量键并快速拉回。\n"
-                + "同时建议在电池设置中选择允许后台运行/不限制，否则部分国产系统仍可能限制服务。");
+                + "媒体音量：" + current + " / " + max + "\n"
+                + "限制档位：" + limit + " / " + max + "，约 " + percent + "%\n\n"
+                + "到达限制档位后，耳机状态下音量上键会被拦截；长按重复事件也会被拦截。\n"
+                + "建议先把耳机音量调到舒服的位置，再点“设为当前音量”。");
     }
 
     private void requestRuntimePermissions() {
