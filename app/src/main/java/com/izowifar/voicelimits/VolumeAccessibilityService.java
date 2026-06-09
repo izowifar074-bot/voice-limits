@@ -36,24 +36,17 @@ public class VolumeAccessibilityService extends AccessibilityService {
         if (audioManager == null) return false;
         if (!VolumeLimiter.isHeadsetActive(audioManager)) return false;
 
-        // Do not handle ACTION_UP. Handling key-up near the limit can confuse some systems
-        // and may be related to the runaway-to-max behavior seen on the device.
         if (event.getAction() != KeyEvent.ACTION_DOWN) {
             return false;
         }
 
-        // Global long-press guard: for both volume-up and volume-down, allow only the first
-        // DOWN event to reach Android. All repeated DOWN events are consumed.
-        // This makes a physical long press behave like one normal tap.
         if (event.getRepeatCount() > 0) {
             return true;
         }
 
-        // Let Android handle normal single taps so the system volume panel still appears.
-        // Only block volume-up when it is already at the configured headset limit.
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
             int current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
-            int limit = VolumeLimiter.getLimitVolume(audioManager);
+            int limit = VolumeLimiter.getLimitVolume(this, audioManager);
             return current >= limit;
         }
 
