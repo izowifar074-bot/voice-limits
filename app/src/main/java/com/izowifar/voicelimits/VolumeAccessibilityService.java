@@ -40,25 +40,55 @@ public class VolumeAccessibilityService extends AccessibilityService {
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
         if (!VolumeLimiter.isEnabled(this)) return false;
+        ensureAudioManager();
         int keyCode = event.getKeyCode();
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN || event.getAction() == KeyEvent.ACTION_UP) {
-                clampNow();
-                handler.removeCallbacks(clampRunnable);
-                handler.postDelayed(clampRunnable, 10L);
-                handler.postDelayed(clampRunnable, 30L);
-                handler.postDelayed(clampRunnable, 70L);
-            }
+
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            boolean shouldBlock = shouldBlockVolumeUp();
+            clampNowSoon();
+            return shouldBlock;
+        }
+
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            clampNowSoon();
+            return false;
+        }
+
+        return false;
+    }
+
+    private boolean shouldBlockVolumeUp() {
+        if (audioManager == null) return false;
+        if (!VolumeLimiter.isHeadsetActive(audioManager)) return false;
+        int current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+        int limit = VolumeLimiter.getLimitVolume(audioManager);
+        if (current >= limit) {
+            VolumeLimiter.clampIfNeeded(audioManager);
+            return true;
         }
         return false;
     }
 
+    private void clampNowSoon() {
+        clampNow();
+        handler.removeCallbacks(clampRunnable);
+        handler.postDelayed(clampRunnable, 5L);
+        handler.postDelayed(clampRunnable, 15L);
+        handler.postDelayed(clampRunnable, 35L);
+        handler.postDelayed(clampRunnable, 80L);
+        handler.postDelayed(clampRunnable, 150L);
+    }
+
     private void clampNow() {
-        if (audioManager == null) {
-            audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
-        }
+        ensureAudioManager();
         if (audioManager != null && VolumeLimiter.isEnabled(this) && VolumeLimiter.isHeadsetActive(audioManager)) {
             VolumeLimiter.clampIfNeeded(audioManager);
+        }
+    }
+
+    private void ensureAudioManager() {
+        if (audioManager == null) {
+            audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
         }
     }
 }
