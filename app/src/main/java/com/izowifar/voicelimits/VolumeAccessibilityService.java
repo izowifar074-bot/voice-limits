@@ -2,35 +2,22 @@ package com.izowifar.voicelimits;
 
 import android.accessibilityservice.AccessibilityService;
 import android.media.AudioManager;
-import android.os.Handler;
-import android.os.Looper;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 
 public class VolumeAccessibilityService extends AccessibilityService {
     private AudioManager audioManager;
-    private final Handler handler = new Handler(Looper.getMainLooper());
-
-    private final Runnable clampRunnable = new Runnable() {
-        @Override
-        public void run() {
-            clampNow();
-        }
-    };
 
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
-        clampNow();
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (VolumeLimiter.isEnabled(this)) {
-            handler.removeCallbacks(clampRunnable);
-            handler.postDelayed(clampRunnable, 30L);
-        }
+        // Intentionally no-op. Do not modify volume from generic accessibility events,
+        // otherwise some systems bounce the volume slider or keep repeating adjustments.
     }
 
     @Override
@@ -40,50 +27,23 @@ public class VolumeAccessibilityService extends AccessibilityService {
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
         if (!VolumeLimiter.isEnabled(this)) return false;
-        ensureAudioManager();
         int keyCode = event.getKeyCode();
 
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-            boolean shouldBlock = shouldBlockVolumeUp();
-            clampNowSoon();
-            return shouldBlock;
-        }
-
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            clampNowSoon();
+        if (keyCode != KeyEvent.KEYCODE_VOLUME_UP) {
             return false;
         }
 
-        return false;
-    }
-
-    private boolean shouldBlockVolumeUp() {
+        ensureAudioManager();
         if (audioManager == null) return false;
         if (!VolumeLimiter.isHeadsetActive(audioManager)) return false;
+
         int current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
         int limit = VolumeLimiter.getLimitVolume(audioManager);
-        if (current >= limit) {
-            VolumeLimiter.clampIfNeeded(audioManager);
-            return true;
-        }
-        return false;
-    }
 
-    private void clampNowSoon() {
-        clampNow();
-        handler.removeCallbacks(clampRunnable);
-        handler.postDelayed(clampRunnable, 5L);
-        handler.postDelayed(clampRunnable, 15L);
-        handler.postDelayed(clampRunnable, 35L);
-        handler.postDelayed(clampRunnable, 80L);
-        handler.postDelayed(clampRunnable, 150L);
-    }
-
-    private void clampNow() {
-        ensureAudioManager();
-        if (audioManager != null && VolumeLimiter.isEnabled(this) && VolumeLimiter.isHeadsetActive(audioManager)) {
-            VolumeLimiter.clampIfNeeded(audioManager);
-        }
+        // Conservative guard: block one step before the limit as well. This avoids stale
+        // key-repeat readings where Android still processes repeats and jumps to max.
+        int blockAt = Math.max(1, limit - 1);
+        return current >= blockAt;
     }
 
     private void ensureAudioManager() {
