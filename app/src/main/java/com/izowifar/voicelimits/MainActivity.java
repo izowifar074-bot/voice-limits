@@ -87,6 +87,17 @@ public class MainActivity extends Activity {
                 dp(56)
         ));
 
+        Button accessibilityButton = new Button(this);
+        accessibilityButton.setAllCaps(false);
+        accessibilityButton.setText("打开无障碍设置");
+        accessibilityButton.setOnClickListener(v -> openAccessibilitySettings());
+        LinearLayout.LayoutParams accessibilityParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(52)
+        );
+        accessibilityParams.topMargin = dp(12);
+        root.addView(accessibilityButton, accessibilityParams);
+
         Button settingsButton = new Button(this);
         settingsButton.setAllCaps(false);
         settingsButton.setText("打开应用后台/电池设置");
@@ -110,7 +121,9 @@ public class MainActivity extends Activity {
             } else {
                 startService(intent);
             }
+            openAccessibilitySettings();
         } else {
+            VolumeLimitService.cancelKeepAlive(this);
             stopService(intent);
         }
         updateUi();
@@ -127,8 +140,9 @@ public class MainActivity extends Activity {
         toggleButton.setText(enabled ? "关闭音量限制" : "启用音量限制");
         detailText.setText("仅在检测到有线耳机、USB 耳机或蓝牙耳机输出时生效。\n"
                 + "当前耳机状态：" + (headset ? "已检测到" : "未检测到") + "\n"
-                + "媒体音量：" + current + " / " + max + "，限制档位：" + limit + "，约 47% 以下。\n"
-                + "说明：普通应用无法彻底锁死音量键，但会在后台服务中自动拉回。若系统杀后台，请在电池设置中允许后台运行。");
+                + "媒体音量：" + current + " / " + max + "，限制档位：" + limit + "，约 47% 以下。\n\n"
+                + "重要：请在无障碍设置中开启 Voice Limits。开启后即使 App 放到后台，也能监听音量键并快速拉回。\n"
+                + "同时建议在电池设置中选择允许后台运行/不限制，否则部分国产系统仍可能限制服务。");
     }
 
     private void requestRuntimePermissions() {
@@ -155,6 +169,11 @@ public class MainActivity extends Activity {
     private void openAppSettings() {
         Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
         intent.setData(Uri.parse("package:" + getPackageName()));
+        startActivity(intent);
+    }
+
+    private void openAccessibilitySettings() {
+        Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
         startActivity(intent);
     }
 
