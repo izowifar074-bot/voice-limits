@@ -20,7 +20,8 @@ import android.os.SystemClock;
 public class VolumeLimitService extends Service {
     static final String ACTION_START = "com.izowifar.voicelimits.START";
     static final String ACTION_STOP = "com.izowifar.voicelimits.STOP";
-    private static final String CHANNEL_ID = "voice_limits_running";
+
+    private static final String CHANNEL_ID = "voice_limits_status_v2";
     private static final int NOTIFICATION_ID = 4701;
     private static final int KEEP_ALIVE_REQUEST_CODE = 4702;
 
@@ -41,6 +42,7 @@ public class VolumeLimitService extends Service {
                 return;
             }
             enforceLimitWithCooldown();
+            updateRunningNotification();
             handler.postDelayed(this, SAFE_CHECK_INTERVAL_MS);
         }
     };
@@ -50,7 +52,7 @@ public class VolumeLimitService extends Service {
         super.onCreate();
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         createNotificationChannel();
-        startForeground(NOTIFICATION_ID, buildNotification("正在保护耳机音量"));
+        startForeground(NOTIFICATION_ID, buildRunningNotification());
         registerDeviceCallback();
         handler.post(safeCheckRunnable);
         scheduleKeepAlive(this);
@@ -68,6 +70,7 @@ public class VolumeLimitService extends Service {
         VolumeLimiter.setEnabled(this, true);
         scheduleKeepAlive(this);
         enforceLimitWithCooldown();
+        updateRunningNotification();
         return START_STICKY;
     }
 
@@ -140,10 +143,12 @@ public class VolumeLimitService extends Service {
                 @Override
                 public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
                     enforceLimitWithCooldown();
+                    updateRunningNotification();
                 }
 
                 @Override
                 public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
+                    updateRunningNotification();
                 }
             };
             audioManager.registerAudioDeviceCallback(deviceCallback, handler);
@@ -162,7 +167,14 @@ public class VolumeLimitService extends Service {
         }
     }
 
-    private Notification buildNotification(String text) {
+    private void updateRunningNotification() {
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager != null) {
+            manager.notify(NOTIFICATION_ID, buildRunningNotification());
+        }
+    }
+
+    private Notification buildRunningNotification() {
         Intent openIntent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(
                 this,
@@ -176,22 +188,37 @@ public class VolumeLimitService extends Service {
                 : new Notification.Builder(this);
 
         return builder
-                .setContentTitle("Voice Limits 已启用")
-                .setContentText(text)
+                .setContentTitle("Voice Limits 正在运行")
+                .setContentText(buildStatusText())
                 .setSmallIcon(android.R.drawable.ic_lock_silent_mode)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .setPriority(Notification.PRIORITY_DEFAULT)
                 .build();
+    }
+
+    private String buildStatusText() {
+        if (audioManager == null) return "正在保护耳机音量";
+        int current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+        int max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        int limit = VolumeLimiter.getLimitVolume(this, audioManager);
+        boolean headset = VolumeLimiter.isHeadsetActive(audioManager);
+        return (headset ? "耳机已连接" : "等待耳机")
+                + "｜当前 " + current + "/" + max
+                + "｜上限 " + limit + "/" + max;
     }
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
-                    "Voice Limits 后台服务",
-                    NotificationManager.IMPORTANCE_LOW
+                    "Voice Limits 运行状态",
+                    NotificationManager.IMPORTANCE_DEFAULT
             );
-            channel.setDescription("保持耳机媒体音量不超过设定档位");
+            channel.setDescription("显示 Voice Limits 正在运行和当前耳机音量上限");
+            channel.setShowBadge(false);
             NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (manager != null) manager.createNotificationChannel(channel);
         }
