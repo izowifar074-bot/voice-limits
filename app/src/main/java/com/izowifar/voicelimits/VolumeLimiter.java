@@ -8,7 +8,8 @@ import android.os.Build;
 final class VolumeLimiter {
     static final String PREFS = "voice_limits_prefs";
     static final String KEY_ENABLED = "enabled";
-    static final int LIMIT_PERCENT = 47;
+    static final String KEY_LIMIT_VOLUME = "limit_volume";
+    static final int DEFAULT_LIMIT_PERCENT = 47;
 
     private VolumeLimiter() {}
 
@@ -49,14 +50,39 @@ final class VolumeLimiter {
         return false;
     }
 
-    static int getLimitVolume(AudioManager audioManager) {
+    static int getDefaultLimitVolume(AudioManager audioManager) {
+        if (audioManager == null) return 0;
         int max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-        return Math.max(1, (int) Math.floor(max * LIMIT_PERCENT / 100.0));
+        if (max <= 0) return 0;
+        return Math.max(1, (int) Math.floor(max * DEFAULT_LIMIT_PERCENT / 100.0));
     }
 
-    static boolean clampIfNeeded(AudioManager audioManager) {
+    static int getLimitVolume(Context context, AudioManager audioManager) {
+        if (audioManager == null) return 0;
+        int max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        int saved = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_LIMIT_VOLUME, -1);
+        int fallback = getDefaultLimitVolume(audioManager);
+        return clampLimit(saved >= 0 ? saved : fallback, max);
+    }
+
+    static void setLimitVolume(Context context, AudioManager audioManager, int limit) {
+        if (audioManager == null) return;
+        int max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        int clamped = clampLimit(limit, max);
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putInt(KEY_LIMIT_VOLUME, clamped)
+                .apply();
+    }
+
+    static int clampLimit(int limit, int max) {
+        if (max <= 0) return 0;
+        return Math.max(0, Math.min(limit, max));
+    }
+
+    static boolean clampIfNeeded(Context context, AudioManager audioManager) {
         if (audioManager == null) return false;
-        int limit = getLimitVolume(audioManager);
+        int limit = getLimitVolume(context, audioManager);
         int current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
         if (current > limit) {
             audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, limit, 0);
