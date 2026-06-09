@@ -15,7 +15,7 @@ public class KeepAliveReceiver extends BroadcastReceiver {
 
         AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
         if (audioManager != null && VolumeLimiter.isHeadsetActive(audioManager)) {
-            VolumeLimiter.clampIfNeeded(audioManager);
+            VolumeLimiter.clampIfNeeded(context, audioManager);
         }
 
         Intent serviceIntent = new Intent(context, VolumeLimitService.class);
