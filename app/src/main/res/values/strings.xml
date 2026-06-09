@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Voice Limits</string>
+    <string name="accessibility_service_description">监听音量键并在佩戴耳机时把媒体音量快速拉回 47% 以下。</string>
 </resources>
