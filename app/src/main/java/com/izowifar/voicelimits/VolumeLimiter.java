@@ -25,22 +25,28 @@ final class VolumeLimiter {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             AudioDeviceInfo[] devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
             for (AudioDeviceInfo device : devices) {
-                int type = device.getType();
-                if (type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES
-                        || type == AudioDeviceInfo.TYPE_WIRED_HEADSET
-                        || type == AudioDeviceInfo.TYPE_USB_HEADSET
-                        || type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
-                        || type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
-                        || type == AudioDeviceInfo.TYPE_HEARING_AID
-                        || type == AudioDeviceInfo.TYPE_BLE_HEADSET
-                        || type == AudioDeviceInfo.TYPE_BLE_SPEAKER
-                        || type == AudioDeviceInfo.TYPE_BLE_BROADCAST) {
-                    return true;
-                }
+                if (isHeadsetType(device.getType())) return true;
             }
             return false;
         }
         return audioManager.isWiredHeadsetOn() || audioManager.isBluetoothA2dpOn() || audioManager.isBluetoothScoOn();
+    }
+
+    private static boolean isHeadsetType(int type) {
+        if (type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES
+                || type == AudioDeviceInfo.TYPE_WIRED_HEADSET
+                || type == AudioDeviceInfo.TYPE_USB_HEADSET
+                || type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                || type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                || type == AudioDeviceInfo.TYPE_HEARING_AID) {
+            return true;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                    || type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+                    || type == AudioDeviceInfo.TYPE_BLE_BROADCAST;
+        }
+        return false;
     }
 
     static int getLimitVolume(AudioManager audioManager) {
