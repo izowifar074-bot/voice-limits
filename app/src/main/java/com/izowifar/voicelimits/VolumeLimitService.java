@@ -24,8 +24,6 @@ public class VolumeLimitService extends Service {
     private static final int NOTIFICATION_ID = 4701;
     private static final int KEEP_ALIVE_REQUEST_CODE = 4702;
 
-    // Deliberately low-frequency. The AccessibilityService handles the volume key path.
-    // This service is only a visible status + rare safeguard, avoiding volume UI oscillation.
     private static final long SAFE_CHECK_INTERVAL_MS = 10_000L;
     private static final long KEEP_ALIVE_INTERVAL_MS = 60_000L;
 
@@ -52,7 +50,7 @@ public class VolumeLimitService extends Service {
         super.onCreate();
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         createNotificationChannel();
-        startForeground(NOTIFICATION_ID, buildNotification("正在保护耳机音量：上限 47%"));
+        startForeground(NOTIFICATION_ID, buildNotification("正在保护耳机音量"));
         registerDeviceCallback();
         handler.post(safeCheckRunnable);
         scheduleKeepAlive(this);
@@ -146,7 +144,6 @@ public class VolumeLimitService extends Service {
 
                 @Override
                 public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
-                    // Do nothing. Avoid fighting system routing changes.
                 }
             };
             audioManager.registerAudioDeviceCallback(deviceCallback, handler);
@@ -157,7 +154,7 @@ public class VolumeLimitService extends Service {
         if (audioManager == null) return;
         if (!VolumeLimiter.isHeadsetActive(audioManager)) return;
         int current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
-        int limit = VolumeLimiter.getLimitVolume(audioManager);
+        int limit = VolumeLimiter.getLimitVolume(this, audioManager);
         long now = SystemClock.elapsedRealtime();
         if (current > limit && now - lastCorrectionAt > 1500L) {
             audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, limit, 0);
@@ -194,7 +191,7 @@ public class VolumeLimitService extends Service {
                     "Voice Limits 后台服务",
                     NotificationManager.IMPORTANCE_LOW
             );
-            channel.setDescription("保持耳机媒体音量低于 47%");
+            channel.setDescription("保持耳机媒体音量不超过设定档位");
             NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (manager != null) manager.createNotificationChannel(channel);
         }
