@@ -28,8 +28,6 @@ public class VolumeLimitService extends Service {
     private static final int NOTIFICATION_ID = 4701;
     private static final int KEEP_ALIVE_REQUEST_CODE = 4702;
 
-    // Fast enough to pull the volume back almost immediately after a hardware-key repeat.
-    // 50ms is intentionally aggressive because the app is safety-oriented and only runs when enabled.
     private static final long CHECK_INTERVAL_MS = 50L;
     private static final long BURST_INTERVAL_MS = 15L;
     private static final int BURST_CHECKS = 12;
